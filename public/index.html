@@ -1558,14 +1558,13 @@ function openSubmitModal(taskId) {
 async function confirmSubmit() {
   if (!currentSubmitTask) return;
   const t = currentSubmitTask;
-  
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  
-  const plannedDate = new Date(t.planned_date);
-  plannedDate.setHours(0, 0, 0, 0);
-  
-  const onTime = now <= plannedDate;
+
+  // ✅ FIX: Compare dates as YYYY-MM-DD strings to avoid timezone/time issues
+  // This ensures same-day completion is always "Done On Time"
+  const nowStr     = new Date().toISOString().split('T')[0];
+  const plannedStr = new Date(t.planned_date).toISOString().split('T')[0];
+
+  const onTime = nowStr <= plannedStr;
   const status = onTime ? 'Done On Time' : 'Done Late';
   const getV = id => document.getElementById(id).value;
 
