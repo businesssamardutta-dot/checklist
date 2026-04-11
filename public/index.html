@@ -632,6 +632,35 @@ body {
 .t-error   .t-icon { color: #F87171; }
 .t-info    .t-icon { color: #60A5FA; }
 
+/* ── RANK CARDS ──────────────────────────────────────────────── */
+.rank-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.rank-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 14px;
+  box-shadow: var(--shadow-xs);
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 5px;
+  position: relative; overflow: hidden;
+  transition: box-shadow .2s, transform .2s;
+}
+.rank-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.rank-card::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; }
+.rank-card.excellent::before { background: linear-gradient(90deg,#059669,#34D399); }
+.rank-card.good::before      { background: linear-gradient(90deg,#1A56DB,#3B82F6); }
+.rank-card.average::before   { background: linear-gradient(90deg,#D97706,#FBBF24); }
+.rank-card.improve::before   { background: linear-gradient(90deg,#DC2626,#F87171); }
+.rank-emoji { font-size: 1.8rem; line-height: 1.2; }
+.rank-label { font-weight: 700; font-size: .8rem; color: var(--ink); }
+.rank-person { font-size: .75rem; color: var(--ink-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
+.rank-score-num { font-family: 'Space Mono', monospace; font-size: 1.25rem; font-weight: 700; }
+.rank-stats-sm { font-size: .68rem; color: var(--ink-muted); }
+.rank-card.excellent .rank-score-num { color: var(--green); }
+.rank-card.good      .rank-score-num { color: var(--blue); }
+.rank-card.average   .rank-score-num { color: var(--amber); }
+.rank-card.improve   .rank-score-num { color: var(--red); }
+
 /* ── RESPONSIVE ──────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
@@ -848,6 +877,10 @@ body {
           <div><div class="pg-title">Scoring &amp; Leaderboard</div><div class="pg-sub">Score formula: (On-Time / Total × 100) − 100</div></div>
           <button class="btn-icon" onclick="exportCsv('scoring')"><i class="bi bi-download"></i>CSV</button>
         </div>
+
+        <!-- ── PERFORMANCE RANK CARDS ── -->
+        <div id="perfRankCards" style="margin-bottom:18px;"></div>
+
         <div class="row g-3 mb-3">
           <div class="col-md-5">
             <div class="card-wrap h-100">
@@ -1215,11 +1248,28 @@ function buildDeptChart(labels, data) {
 }
 
 // ── DOERS ─────────────────────────────────────────────────────
+let DOER_PK = 'name'; // fallback; auto-detected after first load
+
+function detectDoerPK(row) {
+  if (!row) return 'name';
+  if (row.id   !== undefined) return 'id';
+  if (row.uuid !== undefined) return 'uuid';
+  // Supabase always returns the PK first — grab the first numeric/uuid-like key
+  for (const k of Object.keys(row)) {
+    if (k === 'name' || k === 'department' || k === 'email' || k === 'phone' || k === 'whatsapp' || k === 'user_type') continue;
+    return k;
+  }
+  return 'name';
+}
+
 async function loadDoers() {
   if (!sb) return;
-  const { data } = await sb.from('doers').select('*').order('created_at', { ascending: true });
+  const { data } = await sb.from('doers').select('*').order('name', { ascending: true });
   DOERS_CACHE = data || [];
-  document.getElementById('doerTbody').innerHTML = DOERS_CACHE.map((r, i) => `
+  if (DOERS_CACHE.length) DOER_PK = detectDoerPK(DOERS_CACHE[0]);
+  document.getElementById('doerTbody').innerHTML = DOERS_CACHE.map((r, i) => {
+    const pkVal = r[DOER_PK];
+    return `
     <tr>
       <td style="color:var(--ink-muted);font-family:'Space Mono',monospace;font-size:.75rem;">${i+1}</td>
       <td><strong>${r.name || ''}</strong></td>
@@ -1229,16 +1279,17 @@ async function loadDoers() {
       <td>${r.whatsapp || ''}</td>
       <td><span class="badge badge-role">${r.user_type || 'User'}</span></td>
       <td>
-        <button class="btn-icon" onclick="editDoer('${r.id}')"><i class="bi bi-pencil"></i></button>
-        <button class="btn-icon danger ms-1" onclick="deleteDoer('${r.id}')"><i class="bi bi-trash"></i></button>
+        <button class="btn-icon" onclick="editDoer(${JSON.stringify(String(pkVal))})"><i class="bi bi-pencil"></i></button>
+        <button class="btn-icon danger ms-1" onclick="deleteDoer(${JSON.stringify(String(pkVal))})"><i class="bi bi-trash"></i></button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
-function openDoerModal(id) {
-  document.getElementById('doerEditId').value = id || '';
-  if (id) {
-    const r = DOERS_CACHE.find(d => String(d.id) === String(id)) || {};
+function openDoerModal(pkVal) {
+  document.getElementById('doerEditId').value = pkVal || '';
+  if (pkVal) {
+    const r = DOERS_CACHE.find(d => String(d[DOER_PK]) === String(pkVal)) || {};
     document.getElementById('d_name').value     = r.name || '';
     document.getElementById('d_dept').value     = r.department || '';
     document.getElementById('d_email').value    = r.email || '';
@@ -1251,7 +1302,7 @@ function openDoerModal(id) {
   }
   new bootstrap.Modal(document.getElementById('doerModal')).show();
 }
-function editDoer(id) { openDoerModal(id); }
+function editDoer(pkVal) { openDoerModal(pkVal); }
 
 async function saveDoer() {
   const name = document.getElementById('d_name').value.trim();
@@ -1264,22 +1315,22 @@ async function saveDoer() {
     whatsapp:   document.getElementById('d_wa').value.trim(),
     user_type:  document.getElementById('d_usertype').value,
   };
-  const id = document.getElementById('doerEditId').value;
+  const pkVal = document.getElementById('doerEditId').value;
   bootstrap.Modal.getInstance(document.getElementById('doerModal')).hide();
-  if (id) {
-    const { error } = await sb.from('doers').update(row).eq('id', id);
-    error ? toast('Update failed: ' + error.message, 'error') : toast('Doer updated', 'success');
+  if (pkVal) {
+    const { error } = await sb.from('doers').update(row).eq(DOER_PK, pkVal);
+    error ? toast('Update failed: ' + error.message, 'error') : toast('Doer updated ✓', 'success');
   } else {
     const { error } = await sb.from('doers').insert(row);
-    error ? toast('Insert failed: ' + error.message, 'error') : toast('Doer added', 'success');
+    error ? toast('Insert failed: ' + error.message, 'error') : toast('Doer added ✓', 'success');
   }
   loadDoers();
 }
 
-async function deleteDoer(id) {
+async function deleteDoer(pkVal) {
   if (!confirm('Delete this doer?')) return;
-  await sb.from('doers').delete().eq('id', id);
-  toast('Doer deleted', 'info');
+  const { error } = await sb.from('doers').delete().eq(DOER_PK, pkVal);
+  error ? toast('Delete failed: ' + error.message, 'error') : toast('Doer deleted', 'info');
   loadDoers();
 }
 
@@ -1470,6 +1521,10 @@ async function loadScoring() {
   const { data: sc } = await sb.from('scoring').select('*').order('submitted_on', { ascending: false });
   const scoring = sc || [];
   const lb = buildLeaderboard(scoring);
+
+  // ── RENDER PERFORMANCE RANK CARDS ──────────────────────────
+  renderPerfRankCards(lb);
+
   renderLeaderboard(lb, 'scoringLeaderboard');
 
   const ctx = document.getElementById('chartScore').getContext('2d');
@@ -1480,7 +1535,7 @@ async function loadScoring() {
     data: {
       labels: top10.map(p => p.name),
       datasets: [{ label: 'Score', data: top10.map(p => p.score),
-        backgroundColor: top10.map(p => p.score >= -30 ? '#059669' : p.score >= -60 ? '#D97706' : '#DC2626'),
+        backgroundColor: top10.map(p => p.score >= -10 ? '#059669' : p.score >= -30 ? '#1A56DB' : p.score >= -60 ? '#D97706' : '#DC2626'),
         borderRadius: 5 }]
     },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: false } } }
@@ -1495,6 +1550,53 @@ async function loadScoring() {
       <td><span class="${r.on_time ? 'badge badge-ontime' : 'badge badge-late'}">${r.on_time ? 'On Time' : 'Late'}</span></td>
       <td style="font-family:'Space Mono',monospace;font-size:.78rem;">${fmtDate(r.submitted_on)}</td>
     </tr>`).join('');
+}
+
+function getRankMeta(score) {
+  if (score >= -10) return { cls: 'excellent', emoji: '🏆', label: 'Excellent',         color: 'var(--green)' };
+  if (score >= -30) return { cls: 'good',      emoji: '👍', label: 'Good',              color: 'var(--blue)'  };
+  if (score >= -60) return { cls: 'average',   emoji: '📈', label: 'Needs Improvement', color: 'var(--amber)' };
+  return                   { cls: 'improve',   emoji: '⚠️', label: 'Critical',          color: 'var(--red)'   };
+}
+
+function renderPerfRankCards(lb) {
+  const el = document.getElementById('perfRankCards');
+  if (!el) return;
+  if (!lb.length) { el.innerHTML = ''; return; }
+
+  // Count people in each tier
+  const tiers = { excellent: [], good: [], average: [], improve: [] };
+  lb.forEach(p => { const r = getRankMeta(p.score); tiers[r.cls].push(p); });
+
+  const tierDefs = [
+    { key: 'excellent', emoji: '🏆', label: 'Excellent',         sub: 'Score ≥ −10',  cls: 'excellent' },
+    { key: 'good',      emoji: '👍', label: 'Good',              sub: 'Score −10 to −30', cls: 'good' },
+    { key: 'average',   emoji: '📈', label: 'Need Improvement',  sub: 'Score −30 to −60', cls: 'average' },
+    { key: 'improve',   emoji: '⚠️', label: 'Critical',          sub: 'Score < −60',  cls: 'improve' },
+  ];
+
+  el.innerHTML = `
+    <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--ink-muted);margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+      <i class="bi bi-bar-chart-steps" style="color:var(--blue);font-size:.9rem;"></i> Performance Ratings
+    </div>
+    <div class="rank-grid">
+      ${tierDefs.map(t => {
+        const people = tiers[t.key];
+        const count  = people.length;
+        const topPerson = people[0];
+        const pct = lb.length > 0 ? Math.round((count / lb.length) * 100) : 0;
+        return `
+        <div class="rank-card ${t.cls}">
+          <div class="rank-emoji">${t.emoji}</div>
+          <div class="rank-label">${t.label}</div>
+          <div class="rank-score-num">${count} <span style="font-size:.75rem;font-weight:400;font-family:'DM Sans',sans-serif;">people</span></div>
+          <div class="rank-stats-sm">${pct}% of all doers</div>
+          <div style="width:100%;height:1px;background:var(--border);margin:4px 0;"></div>
+          <div class="rank-stats-sm" style="color:var(--ink-soft);">${t.sub}</div>
+          ${topPerson ? `<div class="rank-person" title="${topPerson.name}">Top: ${topPerson.name}</div>` : '<div class="rank-person">—</div>'}
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 // ── MY TASKS ───────────────────────────────────────────
