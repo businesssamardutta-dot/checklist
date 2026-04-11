@@ -464,6 +464,18 @@ body {
 }
 .btn-success:hover { background: #047857; transform: translateY(-1px); }
 
+.btn-whatsapp {
+  background: #25D366;
+  color: #fff; border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: .78rem; font-weight: 700;
+  cursor: pointer; font-family: 'DM Sans', sans-serif;
+  transition: all .2s;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.btn-whatsapp:hover { background: #1FAD53; transform: translateY(-1px); }
+
 .btn-icon {
   background: var(--paper);
   border: 1px solid var(--border);
@@ -803,7 +815,7 @@ body {
           </div>
           <div class="tbl-scroll">
             <table class="data-table" id="masterTable">
-              <thead><tr><th>Name</th><th>Department</th><th>Task ID</th><th>Freq</th><th>Task</th><th>Planned</th><th>Actual</th><th>Status</th></tr></thead>
+              <thead><tr><th>Name</th><th>Department</th><th>Task ID</th><th>Freq</th><th>Task</th><th>Planned</th><th>Actual</th><th>Status</th><th>Notify</th></tr></thead>
               <tbody id="masterTbody"></tbody>
             </table>
           </div>
@@ -1117,10 +1129,13 @@ async function loadDashboard() {
   ]);
 
   const now = new Date();
+  now.setHours(0, 0, 0, 0);
   let pending = 0, overdue = 0;
   (master || []).forEach(r => {
     if (!r.status) {
-      new Date(r.planned_date) < now ? overdue++ : pending++;
+      const planDate = new Date(r.planned_date);
+      planDate.setHours(0, 0, 0, 0);
+      planDate < now ? overdue++ : pending++;
     }
   });
 
@@ -1223,7 +1238,7 @@ async function loadDoers() {
 function openDoerModal(id) {
   document.getElementById('doerEditId').value = id || '';
   if (id) {
-    const r = DOERS_CACHE.find(d => d.id === id) || {};
+    const r = DOERS_CACHE.find(d => String(d.id) === String(id)) || {};
     document.getElementById('d_name').value     = r.name || '';
     document.getElementById('d_dept').value     = r.department || '';
     document.getElementById('d_email').value    = r.email || '';
@@ -1309,10 +1324,10 @@ function editTask(id) { openTaskModal(id); }
 
 async function loadDoersForSelect() {
   if (!sb) return;
-  const { data } = await sb.from('doers').select('name, department').order('name');
+  const { data } = await sb.from('doers').select('name, department, whatsapp').order('name');
   document.getElementById('t_doer').innerHTML =
     '<option value="">— Select Doer —</option>' +
-    (data || []).map(d => `<option value="${d.name}" data-dept="${d.department || ''}">${d.name} (${d.department || ''})</option>`).join('');
+    (data || []).map(d => `<option value="${d.name}" data-dept="${d.department || ''}" data-wa="${d.whatsapp || ''}">${d.name} (${d.department || ''})</option>`).join('');
 }
 
 function autoFillDept() {
@@ -1392,6 +1407,21 @@ async function generateMaster() {
   loadMaster();
 }
 
+// ── WHATSAPP NOTIFY ───────────────────────────────────────────
+async function sendWhatsAppNotify(doerName, taskName, plannedDate) {
+  if (!sb) return;
+  const { data } = await sb.from('doers').select('whatsapp').ilike('name', doerName).limit(1);
+  if (!data || !data.length || !data[0].whatsapp) {
+    toast('WhatsApp not available for ' + doerName, 'error');
+    return;
+  }
+  const wa = data[0].whatsapp.replace(/[^0-9]/g, '');
+  const msg = encodeURIComponent(`Hello ${doerName},\n\nReminder: You have a pending task.\n\nTask: ${taskName}\nPlanned Date: ${fmtDate(plannedDate)}\n\nPlease complete on time.\n\n- CheckList Maintenance System`);
+  const url = `https://wa.me/${wa}?text=${msg}`;
+  window.open(url, '_blank');
+  toast('WhatsApp opened', 'success');
+}
+
 // ── MASTER DISPLAY ────────────────────────────────────────────
 async function loadMaster() {
   if (!sb) return;
@@ -1401,6 +1431,7 @@ async function loadMaster() {
     const badge = st === 'Done On Time' ? `<span class="badge badge-ontime">${st}</span>`
                 : st === 'Done Late'    ? `<span class="badge badge-late">${st}</span>`
                 : `<span class="badge badge-pending">Pending</span>`;
+    const waBtn = !st ? `<button class="btn-whatsapp" onclick="sendWhatsAppNotify('${r.doer_name}','${r.task_name}','${r.planned_date}')"><i class="bi bi-whatsapp"></i></button>` : '';
     return `<tr>
       <td>${r.doer_name || ''}</td><td>${r.department || ''}</td>
       <td style="font-family:'Space Mono',monospace;font-size:.75rem;">${r.task_ref_id || ''}</td>
@@ -1409,6 +1440,7 @@ async function loadMaster() {
       <td style="font-family:'Space Mono',monospace;font-size:.78rem;">${fmtDate(r.planned_date)}</td>
       <td style="font-family:'Space Mono',monospace;font-size:.78rem;">${r.actual_date ? fmtDate(r.actual_date) : '—'}</td>
       <td>${badge}</td>
+      <td>${waBtn}</td>
     </tr>`;
   }).join('');
 }
@@ -1470,6 +1502,7 @@ async function loadMyTasks() {
   if (!sb) return;
   const el = document.getElementById('myTasksContainer');
   const now = new Date();
+  now.setHours(0, 0, 0, 0);
   const limit = new Date(now.getTime() + 10 * 86400000);
 
   const { data } = await sb.from('master_schedule')
@@ -1488,6 +1521,7 @@ async function loadMyTasks() {
 
   el.innerHTML = window._pendingTasks.map(t => {
     const planned = new Date(t.planned_date);
+    planned.setHours(0, 0, 0, 0);
     const isOverdue = planned < now;
     return `<div class="task-card ${isOverdue ? 'overdue' : 'ok'}">
       <div class="task-head">
@@ -1524,13 +1558,20 @@ function openSubmitModal(taskId) {
 async function confirmSubmit() {
   if (!currentSubmitTask) return;
   const t = currentSubmitTask;
+  
   const now = new Date();
-  const onTime = now <= new Date(t.planned_date);
+  now.setHours(0, 0, 0, 0);
+  
+  const plannedDate = new Date(t.planned_date);
+  plannedDate.setHours(0, 0, 0, 0);
+  
+  const onTime = now <= plannedDate;
   const status = onTime ? 'Done On Time' : 'Done Late';
   const getV = id => document.getElementById(id).value;
 
+  const actualDateTime = new Date();
   const updateData = {
-    actual_date: now.toISOString(),
+    actual_date: actualDateTime.toISOString(),
     status: status,
     remarks: getV('chk_remarks')
   };
@@ -1542,7 +1583,7 @@ async function confirmSubmit() {
     department: t.department,
     task_name: t.task_name,
     planned_date: t.planned_date,
-    actual_date: now.toISOString(),
+    actual_date: actualDateTime.toISOString(),
     status: status,
     submitted_by: SESSION.name,
     remarks: getV('chk_remarks')
@@ -1555,7 +1596,7 @@ async function confirmSubmit() {
     on_time: onTime,
     score: onTime ? 0 : -10,
     planned_date: t.planned_date,
-    actual_date: now.toISOString()
+    actual_date: actualDateTime.toISOString()
   });
 
   bootstrap.Modal.getInstance(document.getElementById('submitModal')).hide();
