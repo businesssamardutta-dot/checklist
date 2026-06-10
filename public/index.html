@@ -1611,53 +1611,40 @@ function renderPerfRankCards(lb) {
     </div>`;
 }
 
-// ── MY TASKS (USER VIEW) ───────────────
 async function loadMyTasks() {
   if (!sb) return;
   const el = document.getElementById('myTasksContainer');
   
-  // 1. Get "Start of Today" (00:00:00) to ensure proper comparison
   const now = new Date();
   now.setHours(0, 0, 0, 0);
-
-  // 2. Calculate the "Limit Date" (Today + 10 days)
   const tenDaysFromNow = new Date(now.getTime() + (10 * 24 * 60 * 60 * 1000));
 
-  // 3. Query: 
-  // - Filter by user's name (case-insensitive)
-  // - Only tasks where status is still NULL (Pending)
-  // - Planned date must be LESS THAN or EQUAL TO the 10-day limit
-  // (This automatically includes everything from the past/overdue)
+  // We use .or() to catch both NULL and empty string statuses
+  // We use % wildcards to catch names even if they have extra spaces
   const { data, error } = await sb.from('master_schedule')
     .select('*')
-    .ilike('doer_name', SESSION.name)
-    .is('status', null)
-    .lte('planned_date', tenDaysFromNow.toISOString()) 
+    .ilike('doer_name', `%${SESSION.name}%`) 
+    .or('status.is.null,status.eq.""')       
+    .lte('planned_date', tenDaysFromNow.toISOString())
     .order('planned_date', { ascending: true });
 
   if (error) {
     console.error("Error fetching tasks:", error);
-    el.innerHTML = `<div class="empty-state">Error loading tasks. Please try again.</div>`;
+    el.innerHTML = `<div class="empty-state">Error loading tasks.</div>`;
     return;
   }
 
   window._pendingTasks = data || [];
 
-  // 4. Handle Empty State
   if (!window._pendingTasks.length) {
     el.innerHTML = `<div class="empty-state"><i class="bi bi-emoji-smile"></i><strong>All caught up!</strong><br>No pending tasks for the next 10 days.</div>`;
     return;
   }
 
-  // 5. Render Task Cards
   el.innerHTML = window._pendingTasks.map(t => {
     const planned = new Date(t.planned_date);
     planned.setHours(0, 0, 0, 0);
-    
-    // If planned date is before 'now' (today), it is OVERDUE
     const isOverdue = planned < now;
-    
-    // Determine CSS class: 'overdue' (Red) or 'ok' (Green)
     const statusClass = isOverdue ? 'overdue' : 'ok';
     const statusLabel = isOverdue ? 'OVERDUE' : 'DUE SOON';
     const labelColor = isOverdue ? 'var(--red)' : 'var(--green)';
